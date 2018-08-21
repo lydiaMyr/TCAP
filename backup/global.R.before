@@ -1,0 +1,228 @@
+# global.R contains all the functions to run the software process
+
+library("sva")
+library("e1071")
+library("rpart")
+library("ggplot2")
+library("cowplot")
+load("Reference/immuneRefer.Rdata")
+referProfile=immune_reference$referProfile
+sigGenes=immune_reference$sigGenes
+T_fre=c()
+svr_fun<-function(pre,r){
+  model<-svm(pre[,-8],pre[,8],type="nu-regression",nu=r,kernel="linear")
+  return (model)
+}
+svr_fra_pre=function(refer,sam_exp){
+  pre<-cbind(refer,sam_exp)
+  model1=svr_fun(pre,0.25)
+  model2=svr_fun(pre,0.5)
+  model3=svr_fun(pre,0.75)
+  MSE=c((mean(model1$residuals)^2),(mean(model2$residuals)^2),(mean(model3$residuals)^2))
+  result=rbind(t(model1$coefs)%*%model1$SV,t(model2$coefs)%*%model2$SV,t(model3$coefs)%*%model3$SV)
+  best_index<-which.min(MSE)
+  best_result<-result[best_index,]
+  zero_index<-which(best_result<0)
+  best_result[zero_index]=0
+  return (best_result)
+}
+plot_fun=function(data_type,figure_type){
+  p=NULL
+  if (data_type!="user"){
+    res=read.table(paste("TCGA_cancers/",data_type,"_figure.txt",sep=""),header=T,row.names = 1)
+    T_fre=res
+  }
+  N=nrow(T_fre)
+  if (N>50){
+    N=50
+    x=rep(row.names(T_fre)[1:50],each=8)
+  }else{
+    x=rep(row.names(T_fre),each=8)
+  }
+  z=c()
+  for(i in seq(1,N)){
+    z=c(z,as.numeric(T_fre[i,]))
+  }
+  df = data.frame(x = x, y = z)
+  Cell_type=rep(c("CD4 naive","CD4 central memory","CD4 effector memory","CD8 naive","CD8 central memory","CD8 effector memory","Treg","T gamma delta"),times=N)
+  p=ggplot(df, mapping = aes(x = x, y = z, fill = Cell_type)) + geom_bar(stat = 'identity',position = 'fill')+theme(axis.text.x=element_text(angle=90,hjust = 0.5,vjust=0.5))+labs(x="Sample",y="Abundance",title = "T cell abundance")
+  N1=nrow(T_fre)
+  x1=rep(c("CD4 naive","CD4 central memory","CD4 effector memory","CD8 naive","CD8 central memory","CD8 effector memory","Treg","T gamma delta"),each=N1)
+  #x=c(rep("CD4_na",N),rep("CD4_cenm",N),rep("CD4_efm",N),rep("CD8_na",N),rep("CD8_cenm",N),rep("CD8_efm",N),rep("Treg",N),rep("T gamma",N))
+  z1=c()
+  for(i in seq(1,8)){
+    z1=c(z1,as.numeric(T_fre[,i]))
+  }
+  Abundance=z1
+  df = data.frame(x = x1, y = z1)
+  Cell_type1=x1
+  p1<- ggplot(df,mapping= aes(x1, y=z1, fill=Cell_type1))+geom_violin()+theme(axis.text.x=element_text(angle=50,hjust = 0.5,vjust=0.5))+labs(x="Cell Type",y="Abundance",title = "T cell abundance")
+  if(figure_type=="boxplot"){
+    p2=p
+  }else{
+    p2=p1
+  }
+  p=p2
+  return(p)
+}
+exp_calculate=function(sample,ratio){
+  sample_mat=as.matrix(sample)
+  ratio_diag=diag(ratio)
+  exp=sample_mat%*%ratio_diag
+  colnames(exp)=colnames(sample)
+  return (exp)
+}
+neg2zero<-function(x){
+  index<-which(x<=0)
+  x[index]=0
+  return(x)
+}
+data_normalization=function(sample,referProfile,sigGenes){
+  sample_scale_counts=scaleCounts(sample,sigGenes=NULL,renormGenes=NULL, normFact=NULL)
+  sample=sample_scale_counts$counts
+  N1<-ncol(referProfile)
+  N2<-ncol(sample)
+  batch_tag<-c(rep(1,N1),rep(2,N2))
+  tmp<-intersect(row.names(referProfile),row.names(sample))
+  sum_sam=apply(sample,1,sum)
+  use_gene=names(which(sum_sam>0))
+  tmp1=intersect(tmp,sigGenes)
+  com_gene=intersect(tmp1,use_gene)
+  com_gene=intersect(tmp,sigGenes)
+  batch_data<-as.data.frame(cbind(referProfile[com_gene,],sample[com_gene,]))
+  batch_data<-apply(batch_data,2,as.numeric)
+  immune_pre_data<-ComBat(batch_data,batch_tag,c())
+  immune_pre_data<-apply(immune_pre_data,2,neg2zero)
+  row.names(immune_pre_data)<-com_gene
+  refer<-immune_pre_data[,1:N1]
+  sam_exp<-immune_pre_data[,(N1+1):(N1+N2)]
+  batch_rm_data=list(referProfile=refer,sample=sam_exp)
+  return (batch_rm_data)
+}
+cart_pre_func=function(refer,sam_exp){
+  immune_data=data.frame(cbind(refer,sam_exp))
+  colnames(immune_data)=c("na","cenm","efm","exp")
+  formula=exp~na+cenm+efm
+  fit=rpart(formula,method = "anova",data=immune_data)
+  var=fit$variable.importance
+  var=var*(1/sum(var))
+  var=var[order(names(var))]
+  #print(var)
+  return (var)
+}
+scaleCounts <- function(counts, sigGenes=NULL, renormGenes=NULL, normFact=NULL){
+  if (is.null(sigGenes))
+    sigGenes <- 1:nrow(counts)
+  
+  if (is.null(normFact)){
+    if (is.null(renormGenes))
+      renormGenes <- 1:nrow(counts)
+    normFact <- colSums(counts[renormGenes,,drop=FALSE], na.rm=TRUE)
+  }
+  counts <- t( t(counts[sigGenes,,drop=FALSE]) / normFact) * 1e6
+  return(list(counts=counts, normFact=normFact))
+}
+normal_func=function(x){
+  ratio=1/sum(x)
+  x=ratio*x
+  return (x)
+}
+T_sub_fra_calculate=function(cell_fre,ratio){
+  fre_mat=as.matrix(cell_fre)
+  ratio_diag=diag(ratio)
+  fre=ratio_diag%*%fre_mat
+  row.names(fre)=row.names(cell_fre)
+  return(fre) 
+}
+tumor_purity_gene_rm=function(cancer){
+  gene_file=read.table(paste("data/cancer_specific_genes/",cancer,".txt",sep=""))
+  markers=as.vector(gene_file[,1])
+  new_sig=intersect(sigGenes,markers)
+  return (new_sig)
+}
+#Sample=read.table("data/1000k_immune_expression_data.txt",header=T,row.names=1)
+getResult <- function(Sample, cell_type){
+  #Sample<-read.table("1000k_immune_expression_data.txt",header=T,row.names = 1)
+  withProgress(message = 'Processing', detail = "data normalization", value = 0, {
+    if (cell_type!="blood"){
+      sigGenes=tumor_purity_gene_rm(cell_type)
+    }
+    data=data_normalization(Sample,referProfile,sigGenes)
+    refer=data$referProfile
+    sam_exp=data$sample
+    #各类型免疫细胞丰度预测
+    incProgress(0.4, detail = "SVR process")
+    Sys.sleep(0.1)
+    withProgress(message = 'Processing', detail = "SVR predict", value = 0,{
+    result_ls=c()
+    for(i in seq(1,ncol(sam_exp))){
+      result=svr_fra_pre(refer,sam_exp[,i])
+      result_ls=rbind(result_ls,result)
+      incProgress(1/ncol(sam_exp), detail = paste("sample",as.character(i),""))
+      Sys.sleep(0.1)
+    }
+    })
+    row.names(result_ls)=colnames(sam_exp)
+    colnames(result_ls)=colnames(refer)
+    result_ls=data.frame(result_ls)
+    CD4_ratio=result_ls$CD4
+    CD8_ratio=result_ls$CD8
+    Treg_ratio=result_ls$Treg*0.2
+    gamma_ratio=result_ls$gamma*0.4
+    #T亚型预测
+    load("Reference/T_reference.Rdata")
+    CD4_profile=T_reference$CD4_profile
+    CD4_sigGenes=T_reference$CD4_sigGenes
+    CD8_profile=T_reference$CD8_profile
+    CD8_sigGenes=T_reference$CD8_sigGenes
+    
+    #矩阵乘法计算CD4表达量
+    CD4_exp=exp_calculate(Sample,CD4_ratio)
+    CD8_exp=exp_calculate(Sample,CD8_ratio)
+    #rm batch effect
+    incProgress(0.3, detail = "CD4 CART process")
+    Sys.sleep(0.1)
+    data=data_normalization(Sample,CD4_profile,CD4_sigGenes)
+    CD4_refer=data$referProfile
+    CD4_sam_exp=data$sample
+    CD4_result=c()
+    for(i in seq(1,ncol(CD4_sam_exp))){
+      sam_exp=CD4_sam_exp[,i]
+      result=cart_pre_func(CD4_refer,sam_exp)
+      CD4_result=rbind(CD4_result,result)
+    }
+    row.names(CD4_result)=colnames(CD4_sam_exp)
+    colnames(CD4_result)=c("CD4_cenm","CD4_efm","CD4_na")
+    #pheatmap(CD4_result,scale="row")
+    incProgress(0.3, detail = "CD8 CART process")
+    Sys.sleep(0.1)
+    data=data_normalization(Sample,CD8_profile,CD8_sigGenes)
+    CD8_refer=data$referProfile
+    CD8_sam_exp=data$sample
+    CD8_result=c()
+    for(i in seq(1,ncol(CD8_sam_exp))){
+      sam_exp=CD8_sam_exp[,i]
+      result=cart_pre_func(CD8_refer,sam_exp)
+      CD8_result=rbind(CD8_result,result)
+    }
+    row.names(CD8_result)=colnames(CD8_exp)
+    colnames(CD8_result)=c("CD8_cenm","CD8_efm","CD8_na")
+    
+    #pheatmap(CD4_result,scale="row")
+    #矩阵乘法计算CD4及CD8亚型细胞丰度
+    CD4_fre=T_sub_fra_calculate(CD4_result,CD4_ratio)
+    CD8_fre=T_sub_fra_calculate(CD8_result,CD8_ratio)
+    T_subtype_fre=cbind(CD4_fre,CD8_fre,Treg_ratio,gamma_ratio)
+    T_fre=t(apply(T_subtype_fre,1,function(x) normal_func(x)))
+    T_fre=apply(T_fre,1,function(x) round(x,4))
+    T_fre<<-t(T_fre)
+    tmp=T_fre[c(3,1,2,6,4,5,7,8),]
+    row.names(tmp)=c("CD4 naive","CD4 central memory","CD4 effector memory","CD8 naive","CD8 central memory","CD8 effector memory","Treg","T gamma delta")
+    T_fre=tmp
+    return(t(T_fre))
+  })
+  
+}
+
+
+

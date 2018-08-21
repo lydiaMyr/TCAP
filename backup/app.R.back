@@ -1,0 +1,303 @@
+# Load packages
+library(shiny)
+library(shinythemes)
+
+# source global.R
+# global.R contains the software processing flow
+source("global.R")  
+
+# input the default reference profiles and example cancer samples(if necessary)
+#default_profiles <- read.table(file = "data/immune_14types_cell_marker.txt", header = T, row.names = 1)
+#default_samples <- read.table(file = "data/sample.txt", header = T, row.names = 1)
+
+
+# User interface 
+ui <- tagList(
+  #shinythemes::themeSelector(), #select interface theme
+  navbarPage(
+    #navigation bar 
+    theme = shinytheme("lumen"),
+    title="PICA",
+    tabPanel("Run", icon=icon("home"),
+             #main title         
+             titlePanel(div("Welcome to PICA",
+                            style = "color:#3F96C3",h3("PICA uses SVR and CART to Predict Immune Cell Abundance",style="color:gray"))), 
+             br(),
+             br(),
+             
+             sidebarLayout(
+               sidebarPanel(
+                 conditionalPanel(
+                   'input.dataset === "Results"',
+                   h3("Input parameters", style = "color:#3F96C3"),
+                   h5(strong("You can choose the example file or your own data as input")),
+                   downloadLink('downloadData', 'example'),
+                   fileInput("file",
+                             h5("Maximum file size is 50MB"),
+                             accept = c(
+                               "text/csv",
+                               "text/comma-separated-values,text/plain",
+                               ".csv")), 
+                   #input cancer samples file
+                   #textOutput("file_information"),
+                   br(),
+                   
+                   selectInput("sample_type",
+                               label = "Select Sample Type",
+                               choices = list("Peripheral Blood Sample"="blood",
+                                              "ACC (Adrenocortical Carcinoma)" = "acc",
+                                              "BLCA (Bladder Urothelial Carcinoma)" = "blca",
+                                              "BRCA (Breast Invasive Carcinoma)" = "brca",
+                                              "CESC (Cervical and Endocervical Cancer)" = "cesc",
+                                              
+                                              "COAD (Colon Adenocarcinoma)" = "coad",
+                                              "DLBC (Diffuse Large B-cell Lymphoma)" = "dlbc",
+                                              
+                                              "GBM (Glioblastoma Multiforme)" = "gbm",
+                                              
+                                              "KICH (Kidney Chromophobe)" = "kich",
+                                              "KIRC (Kidney Renal Clear Cell Carcinoma)" = "kirc",
+                                              "KIRP (Kidney Renal Papillary Cell Carcinoma)" = "kirp",
+                                              "LGG (Lower Grade Glioma)" = "lgg",
+                                              "LIHC (Liver Hepatocellular Carcinoma)" = "lihc",
+                                              "LUAD (Lung Adenocarcinoma)" = "luad",
+                                              "LUSC (Lung Squamous Cell Carcinoma)" = "lusc",
+                                              
+                                              "OV (Ovarian Serous Cystadenocarcinoma)" = "ov",
+                                              
+                                              "PRAD (Prostate Adenocarcinoma)" = "prad",
+                                              "READ (Rectum Adenocarcinoma)" = "read",
+                                              
+                                              "SKCM (Skin Cutaneous Melanoma)" = "skcm",
+                                              "STAD (Stomach Adenocarcinoma)" = "stad",
+                                              
+                                              "THCA (Thyroid Carcinoma)" = "thca",
+                                              
+                                              "UCEC (Uterine Corpus Endometrial Carcinoma)" = "ucec",
+                                              "UCS (Uterine Carsinosarcoma)" = "ucs"),
+                               
+                               selected = "blood"),
+                   h5("Different reference genes will be used depending on the selected sample type"),
+                   br(),
+                   
+                   
+                   textInput("job",
+                             label = "Give a job name to use when exporting files",
+                             value = "PICA_example_result"),
+                   br(),
+                   
+                   #button to run software
+                   actionButton("action", "Run", icon = icon("rocket")) 
+                   
+                 ),
+                 conditionalPanel(
+                   'input.dataset === "Figure"',
+                   selectInput("figure_type",
+                               label = "Select the sample to show",
+                               choices = list("Input result"="user",
+                                              "ACC (Adrenocortical Carcinoma)" = "acc",
+                                              "BLCA (Bladder Urothelial Carcinoma)" = "blca",
+                                              "BRCA (Breast Invasive Carcinoma)" = "brca",
+                                              "CESC (Cervical and Endocervical Cancer)" = "cesc",
+                                              
+                                              "COAD (Colon Adenocarcinoma)" = "coad",
+                                              "DLBC (Diffuse Large B-cell Lymphoma)" = "dlbc",
+                                              
+                                              "GBM (Glioblastoma Multiforme)" = "gbm",
+                                              
+                                              "KICH (Kidney Chromophobe)" = "kich",
+                                              "KIRC (Kidney Renal Clear Cell Carcinoma)" = "kirc",
+                                              "KIRP (Kidney Renal Papillary Cell Carcinoma)" = "kirp",
+                                              "LGG (Lower Grade Glioma)" = "lgg",
+                                              "LIHC (Liver Hepatocellular Carcinoma)" = "lihc",
+                                              "LUAD (Lung Adenocarcinoma)" = "luad",
+                                              "LUSC (Lung Squamous Cell Carcinoma)" = "lusc",
+                                              
+                                              "OV (Ovarian Serous Cystadenocarcinoma)" = "ov",
+                                              
+                                              "PRAD (Prostate Adenocarcinoma)" = "prad",
+                                              "READ (Rectum Adenocarcinoma)" = "read",
+                                              
+                                              "SKCM (Skin Cutaneous Melanoma)" = "skcm",
+                                              "STAD (Stomach Adenocarcinoma)" = "stad",
+                                              
+                                              "THCA (Thyroid Carcinoma)" = "thca",
+                                              
+                                              "UCEC (Uterine Corpus Endometrial Carcinoma)" = "ucec",
+                                              "UCS (Uterine Carsinosarcoma)" = "ucs"),
+                               
+                               selected = "user"),
+                
+                   br(),
+                   radioButtons("dist", "Figure type:",
+                                c("BoxPlot" = "boxplot",
+                                  "Violin" = "violin"
+                                 )),
+                   h5("for those cancers who's sample number larger than 50, we present the first 50 samples in the boxplot, in the violin plot, all samples were included"),
+                   
+                   textInput("title",
+                             label = "Give a job name to use when exporting files",
+                             value = "PICA_example_figure")
+                   )
+                 
+               ),
+               
+               mainPanel(
+                 tabsetPanel(
+                   id="dataset",
+                   tabPanel(
+                     "Results",
+                     helpText("Please select the parameters and then click on 'Run'"),
+                     
+                     #download the result file
+                     uiOutput("file_download"),
+                     
+                     #display the result
+                     uiOutput("predict_result")
+                   ),
+                   tabPanel(
+                     "Figure",
+                     #download the result file
+                     uiOutput("You can choose to browse figure of the input data or cancer from TCGA "),
+                     uiOutput("figure_download"),
+                     
+                     #display the result
+                     uiOutput("figure_result")
+
+                    
+                   )
+               )
+               )
+             )),
+    tabPanel("Document", icon = icon("question-circle"), 
+        tags$div(
+              tags$h2("PICA was designed to predict T cell fractions in samples. In our job, SVR and CART methods were used.",style = "color:#3F96C3"),
+              tags$h3("1. Flow chart of PICA"),
+              tags$img(src="flowchart_old.png",width="800px", height="500px"),
+              tags$h3("2. About the input"),
+              tags$p("The input file should end up with .txt and seperated by tab, you can either input your own file or our example in the home page"),
+              tags$h3("3. How to run PICA"),
+              tags$p("After the input file was uploaded, you need to select the sample type of input file, the types included in PICA were:peripheral blood,  
+                     ACC (Adrenocortical Carcinoma), BLCA (Bladder Urothelial Carcinoma), BRCA (Breast Invasive Carcinoma), CESC (Cervical and Endocervical Cancer),
+                     COAD (Colon Adenocarcinoma), DLBC (Diffuse Large B-cell Lymphoma), GBM (Glioblastoma Multiforme), KICH (Kidney Chromophobe),
+                     KIRC (Kidney Renal Clear Cell Carcinoma), KIRP (Kidney Renal Papillary Cell Carcinoma), LGG (Lower Grade Glioma),
+                     LIHC (Liver Hepatocellular Carcinoma), LUAD (Lung Adenocarcinoma), LUSC (Lung Squamous Cell Carcinoma), OV (Ovarian Serous Cystadenocarcinoma),
+                     PRAD (Prostate Adenocarcinoma), READ (Rectum Adenocarcinoma), SKCM (Skin Cutaneous Melanoma), STAD (Stomach Adenocarcinoma),
+                     THCA (Thyroid Carcinoma), UCEC (Uterine Corpus Endometrial Carcinoma), UCS (Uterine Carsinosarcoma). Then click run, PICA will start to predict 
+                     T cell fractions of each sample"),
+              tags$h3("4. About the result"),
+              tags$p("The result presented in two ways, table in Result panel and figure in Figure panel. In the figure panel, we also presented the T cell
+                    fractions of cancer samples from TCGA"),
+              tags$img(src="result_table.png",width="1000px",height="300px"),
+              br(),
+              tags$img(src="result_figure.png",width="700px",height="500px"),
+              tags$img(src="result_violin.png",width="700px",height="500px")
+            ) 
+
+
+
+    )
+#    tabPanel("About", icon = icon("info-circle"), "Something about the software.")
+  )
+)
+
+# Server logic
+server <- function(input, output) {
+  options(shiny.maxRequestSize = 50*1024^2)
+  go <- reactiveValues(doRun = F)
+  data=read.table("example.txt",header=T,row.names=1)
+  output$downloadData <- downloadHandler(
+    filename = function() {
+        "PICA_example.txt"
+    },
+    content = function(file) {
+      write.table(data, file)
+    }
+  )
+  
+  
+  #read in the cancer samples file
+  sample_file <- reactive({
+    if (is.null(input$file)){
+      return(NULL)
+    }
+    else{
+      return(read.table(input$file$datapath, header = T, row.names = 1))
+    }
+  }) 
+  #get the predict_result dynamically
+  result <- reactive({
+    getResult(sample_file(),input$sample_type)
+  })
+  
+  #trigger response
+  observeEvent(input$action,{ go$doRun = input$action})
+  observeEvent(input$file, { go$doRun = F }) 
+  #observeEvent(input$figure_type)
+  output$predict_result <- renderUI({
+    if (go$doRun == F) return()
+    #remind user that there are parameters not filled
+    isolate({
+      if((is.null(input$file))){
+        h3("Please fill all the parameters!!!", style = "color:red")
+      }
+      else{
+        DT::dataTableOutput("result_table")
+      }
+    })
+  })
+  
+  #display the result in table format
+  output$result_table <- DT::renderDataTable(
+    DT::datatable(result(), options = list(pageLength = 25,searching = FALSE))
+  )
+  
+  #how to dispaly the result table and download result file
+  output$file_download <- renderUI({
+    if (go$doRun == F) return()
+    else{
+      fluidRow(
+        column(3,
+               downloadButton("download", "Download")))
+    }
+  }) 
+  
+  output$download <- downloadHandler(
+    filename = function(){
+      paste(input$job, ".txt")
+    },
+    content = function(file){
+      write.table(result(), file, row.names = T)
+    }
+  )
+  output$figure_result<-renderUI({
+    #if (go$doRun == F) return()
+    #remind user that there are parameters not filled
+    # isolate({
+    # if((input$figure_type=="user")&&()){
+    #   uiOutput("The predict is not finished, you can choose other dataset to view!")
+    # }
+    # else{
+        plotOutput("result_plot",width=1000,height=600)
+    #   }
+    # })
+  })
+  output$result_plot <- renderPlot(plot_fun(input$figure_type,input$dist))
+  output$figure_download <- renderUI({
+    fluidRow(
+        column(3,
+               downloadButton("download_figure", "Download")))
+  }) 
+  output$download_figure <- downloadHandler(
+    filename = function() { paste(input$title, '.png', sep='') },
+    content = function(file) {
+      ggsave(file, plot = plot_fun(input$figure_type,input$dist), device = "png")
+    }
+  )
+  
+}
+# Run the app
+shinyApp(ui = ui, server = server)
+
+
+
